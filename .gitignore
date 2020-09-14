@@ -1,0 +1,4 @@
+*.so
+*.a
+/species/*.dna
+/species/*.S
