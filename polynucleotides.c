@@ -1,33 +1,16 @@
 #define SIG_READ(name) int name(int fd, void *buffer, size_t size)
 
-// -- BEGIN EXPORT H --
-
 //| BEGIN SH: grep '^\s*typedef.*size_t;'
 #include <stddef.h>
 //| END SH
 
-
-//BEGIN SH: sed -e "s/^\([^/]\)/extern \1/" -e 's|^\s*//||'
-//#ifdef __cplusplus
-//extern "C" {
-//#endif
-
-//#ifdef DOME_CAN_READ
 typedef SIG_READ((*fn_read));
-fn_read request_read();
-//#endif
+extern fn_read request_read(); // EXPORT IF DOME_CAN_READ
 
-//#ifdef DOME_CAN_PRINT
 typedef int (*fn_printf)(const char *format, ...);
-fn_printf request_printf();
-//#endif
+extern fn_printf request_printf(); // EXPORT
 
-//#ifdef __cplusplus
-//}
-//#endif
-//END SH
-
-// -- END EXPORT H --
+#ifndef HEADER_ONLY
 
 #include <unistd.h>
 #include <stdio.h>
@@ -52,3 +35,5 @@ fn_read request_read() {
 fn_printf request_printf() {
     return dome_printf;
 }
+
+#endif

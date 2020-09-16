@@ -3,37 +3,43 @@
 IN=polynucleotides.c
 OUT=polynucleotides.h
 
+wrap_in_extern_c() {
+    echo "#ifdef __cplusplus\n\
+extern \"C\" {\n\
+#endif\n\
+$1\n\
+#ifdef __cplusplus\n\
+}\n\
+#endif"
+}
+
+map_export() {
+    sed \
+-e "s|\(.*\)\s*//\s*\<EXPORT\>\s*\<IF\>\s*\(.*\)|\
+$(wrap_in_extern_c "#ifdef \2\n\1\n#endif")|" \
+-e "s|\(.*\)\s*//\s*\<EXPORT\>|$(wrap_in_extern_c "\1")|"
+}
+
+map_all() {
+    echo "$1" | map_export
+}
+
 filter() {
-    BEGUN_EXPORT_H=
     BEGUN_SH=
     while IFS= read LINE; do
-        if [[ -z "$BEGUN_EXPORT_H" ]]; then
-            if [[ "$LINE" =~ ^\ *//\ *" -- BEGIN EXPORT H --"$ ]]; then
-                BEGUN_EXPORT_H=1
-            fi
-        else
-            if [[ "$LINE" =~ ^\ *//\ *" -- END EXPORT H --"$ ]]; then
-                BEGUN_EXPORT_H=
-            elif [[ -n "$BEGUN_SH" ]]; then
-                if [[ "$LINE" =~ ^\ *//\ *"END SH" ]]; then
-                    BEGUN_SH=
-                else
-                    echo "$LINE" | eval $BEGUN_SH
-                fi
-            elif [[ "$LINE" =~ ^\ *//\ *"BEGIN SH: " ]]; then
-                BEGUN_SH="$(echo "$LINE" | sed 's|^\s*//\s*BEGIN SH: ||')"
+        if [[ -n "$BEGUN_SH" ]]; then
+            if [[ "$LINE" =~ ^\ *//\ *"END SH" ]]; then
+                BEGUN_SH=
             else
-                echo "$LINE"
+                map_all "$LINE" | eval $BEGUN_SH
             fi
+        elif [[ "$LINE" =~ ^\ *//\ *"BEGIN SH: " ]]; then
+            BEGUN_SH="$(echo "$LINE" | sed 's|^\s*//\s*BEGIN SH: ||')"
+        else
+            map_all "$LINE"
         fi
     done
-
-    #L=( $(grep -n '// -- \(BEGIN\|END\) '"$1"' --' | cut -d':' -f1 | tr '\n' ' ') )
-    #BEGIN=${L[0]}
-    #END=${L[1]}
-    #unset L
-    #head -n $(($END-1)) | tail -n -$(($END-$BEGIN-1))
 }
 
 # TODO: support cpp in the second gcc
-gcc -E -C -P "$IN" | filter | gcc -E -P -dD -fpreprocessed -x c - > "$OUT"
+gcc -DHEADER_ONLY -E -C -P "$IN" | filter | gcc -E -P -dD -fpreprocessed -x c - > "$OUT"
