@@ -1,17 +1,23 @@
 #!/bin/sh
 
-TMPOUT=$(mktemp)
-echo "int main() { return sizeof(void*); }" | gcc -x c - -o $TMPOUT
+VOIDPTRDEF="$(echo "" | gcc -E -dD -xc - | grep SIZEOF_POINTER)"
 if [ $? -ne 0 ]
 then
-    echo Failed to compile test to check "sizeof(void*)"
+    echo Failed to determine sizeof pointer
     exit 4
 fi
-$TMPOUT
-VOIDPTRSIZE=$?
-unset TMPOUT
+VOIDPTRSIZE="$(echo "$VOIDPTRDEF" | cut -d' ' -f3)"
+unset VOIDPTRDEF
 
 MAX_STATIC=$(($VOIDPTRSIZE * 8))
+
+if [ ! -e libproteins.so ] || [ proteins.c -nt libproteins.so ]; then
+    fold_proteins.sh
+    if [ $? -ne 0 ]; then
+        echo "Error: Unable to fold proteins!"
+        exit 3
+    fi
+fi
 
 IN="$1"
 OUT="${IN%.*}"
@@ -27,7 +33,7 @@ CFLAGS="\
     -fno-asynchronous-unwind-tables\
     -fno-exceptions\
     -no-pie\
-    -L. -ldome"
+    -L. -lproteins"
 
 case "${IN##*.}" in
     c|i)

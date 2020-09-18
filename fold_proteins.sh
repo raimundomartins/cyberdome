@@ -1,7 +1,9 @@
 #!/bin/bash
 
-IN=polynucleotides.c
-OUT=polynucleotides.h
+NAME=proteins
+IN="$NAME".c
+OUTH="$NAME".h
+OUTL=lib"$NAME".so
 
 wrap_in_extern_c() {
     echo "#ifdef __cplusplus\n\
@@ -42,4 +44,6 @@ filter() {
 }
 
 # TODO: support cpp in the second gcc
-gcc -DHEADER_ONLY -E -C -P "$IN" | filter | gcc -E -P -dD -fpreprocessed -x c - > "$OUT"
+gcc -DHEADER_ONLY -E -C -P "$IN" | filter | gcc -E -P -dD -fpreprocessed -x c - > "$OUTH"
+
+gcc -shared -fPIC "$IN" -o "$OUTL"
