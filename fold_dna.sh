@@ -32,8 +32,9 @@ CFLAGS="\
     -fno-stack-protector\
     -fno-asynchronous-unwind-tables\
     -fno-exceptions\
-    -no-pie\
-    -L. -lproteins"
+    -I /usr/include\
+    -no-pie"
+#    -L. -lproteins"
 
 case "${IN##*.}" in
     c|i)
@@ -50,23 +51,25 @@ case "${IN##*.}" in
         ;;
 esac
 
-echo Sequencing DNA... "(transpiling and checking)"
-"$CC" "$IN" $CFLAGS -O0 -S -o "$OUT".S
-if [ $? -ne 0 ]
-then
-    echo "Error: your DNA doesn't fold :("
-    exit 1
-fi
+make_asm_check_syscalls() {
+    echo Sequencing DNA... "(transpiling and checking)"
+    "$CC" "$IN" $CFLAGS -O0 -S -o "$OUT".S
+    if [ $? -ne 0 ]
+    then
+        echo "Error: your DNA doesn't fold :("
+        exit 1
+    fi
 
-grep -n -A4 -B4 "^\s*syscall[^:]" "$OUT".S 2>/dev/null
-if [ $? -eq 0 ]
-then
-    echo "Stop trying to cheat: no syscalls allowed!"
-    exit 2
-fi
+    grep -n -A4 -B4 "^\s*syscall[^:]" "$OUT".S 2>/dev/null
+    if [ $? -eq 0 ]
+    then
+        echo "Stop trying to cheat: no syscalls allowed!"
+        exit 2
+    fi
+}
 
 echo Adding some codons and folding DNA... "(compiling)"
-"$CC" start.S "$IN" $CFLAGS -Os -o "$OUT"
+"$CC" start.S "$IN" $CFLAGS -static -Os -o "$OUT"
 if [ $? -ne 0 ]
 then
     echo "Error: the universe is broken :( (it's not your fault!)"
