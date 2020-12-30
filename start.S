@@ -9,7 +9,7 @@ _start:
     push    %rax;
     push    %rsp;
     push    %rdx;
-    call main;
+    call _enforce_physics_;
     movq %rax,%rdi;
     movl $60,%eax;
     syscall;

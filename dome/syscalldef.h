@@ -38,7 +38,7 @@
     been pushed.
     Syscalls of more than 6 arguments are not supported.  */
 
-#define SET_REG(reg, name, arg) register __typeof__((arg)-(arg)) name asm (reg) = (__typeof__((arg)-(arg)))(arg)
+#define SET_REG(reg, name, arg) register __typeof__((arg)-(arg)) name __asm__ (reg) = (__typeof__((arg)-(arg)))(arg)
 #define SET_REG0()
 #define SET_REG1(arg1)                               SET_REG("rdi", _a1, arg1); SET_REG0()
 #define SET_REG2(arg1, arg2)                         SET_REG("rsi", _a2, arg2); SET_REG1(arg1)
@@ -58,7 +58,7 @@
 #define SYSCALL(num_params, sys_num, ...) ({ \
     unsigned long int resultvar; \
     SET_REG##num_params(__VA_ARGS__); \
-    asm volatile ( \
+    __asm__ volatile ( \
         "syscall\n\t" \
         : "=a" (resultvar) \
         : "0" (sys_num) USE_REG##num_params \
