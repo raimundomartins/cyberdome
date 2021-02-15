@@ -13,16 +13,8 @@ calc_ptr_size() {
 calc_ptr_size
 MAX_STATIC=$(($VOIDPTRSIZE * 8))
 
-if [ ! -e libproteins.so ] || [ proteins.c -nt libproteins.so ]; then
-    fold_proteins.sh
-    if [ $? -ne 0 ]; then
-        echo "Error: Unable to fold proteins!"
-        exit 3
-    fi
-fi
-
 IN="$1"
-OUT="${IN%.*}"
+OUT="build/${IN%.*}"
 
 #    -pedantic\
 #    --warn-error\
@@ -54,17 +46,19 @@ case "${IN##*.}" in
         ;;
 esac
 
-echo "Adding some codons and folding DNA... (compiling)"
-echo $CC start.S dome/physics.c "$IN" $CFLAGS -Os -o "$OUT"
-$CC start.S dome/physics.c "$IN" $CFLAGS -Os -o "$OUT"
-if [ $? -ne 0 ]
-then
-    echo "Error: the universe is broken :( (it's not your fault!)"
+echo $CC "$IN" $CFLAGS -Os -c -o "$OUT.o"
+$CC "$IN" $CFLAGS -Os -c -o "$OUT.o"
+if [ $? -ne 0 ]; then
+    echo "Error: your DNA is deffective"
     exit 3
+fi
+if nm "$OUT.o" | grep _enforce_physics_; then
+    echo "Stop trying to cheat: _enforce_physics_ is a reserved symbol!"
+    exit 2
 fi
 
 section_size() {
-    readelf -S "$OUT" \
+    readelf -S "$OUT.o" \
     | grep -A1 '\[\s*[0-9]*\]' \
     | grep -A1 -e '\.'"$1" \
     | tail -1 \
@@ -72,32 +66,38 @@ section_size() {
     | sed 's/^[^1-9]*\([0-9]\+\)/\1/' #'s/^0*//'
 }
 
-#BSS="$(section_size bss)"
-#DATA="$(section_size data)"
-#if [ $((${BSS:-0} + ${DATA:-0})) -gt $MAX_STATIC ]
-if [ $(($(section_size bss) + $(section_size data))) -gt $MAX_STATIC ]
-then
+if [ $(($(section_size bss) + $(section_size data))) -gt $MAX_STATIC ]; then
     echo "Stop trying to cheat: data and bss sections combined can't be larger than $MAX_STATIC!"
     exit 2
 fi
 
-echo "Pruning DNA a bit... (stripping binary)"
-strip -s -R .comment -R .gnu.hash -R .note.gnu.build-id -R .gnu.version -R .gnu.version_r "$OUT"
+echo $CC dome/physics.c $CFLAGS -Os -S -o $OUT.S
+$CC dome/physics.c $CFLAGS -Os -S -o $OUT.S
 
+echo "Adding some codons and folding DNA... (compiling)"
+echo $CC start.S dome/physics.c "$OUT.o" $CFLAGS -Os -o $OUT
+$CC start.S dome/physics.c "$OUT.o" $CFLAGS -Os -o $OUT
+if [ $? -ne 0 ]; then
+    echo "Error: the universe is broken :( (it's not your fault!)"
+    exit 3
+fi
+
+echo "Pruning DNA... (stripping binary)"
+strip -s -R .comment -R .gnu.hash -R .note.gnu.build-id -R .gnu.version -R .gnu.version_r "${OUT}"
+
+#rm "${OUT}.o"
 echo "Success: your DNA folded :)"
 
 make_asm_check_syscalls() { # Unused
     echo Sequencing DNA... "(transpiling and checking)"
     "$CC" "$IN" $CFLAGS -O0 -S -o "$OUT".S
-    if [ $? -ne 0 ]
-    then
+    if [ $? -ne 0 ]; then
         echo "Error: your DNA doesn't fold :("
         exit 1
     fi
 
     grep -n -A4 -B4 "^\s*syscall[^:]" "$OUT".S 2>/dev/null
-    if [ $? -eq 0 ]
-    then
+    if [ $? -eq 0 ]; then
         echo "Stop trying to cheat: no syscalls allowed!"
         exit 2
     fi

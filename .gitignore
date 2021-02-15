@@ -1,6 +1,9 @@
+*.o
 *.so
 *.a
 .*.swp
 /*.h
 /species/*.dna
 /species/*.S
+*.log
+/build/
