@@ -1,6 +1,6 @@
 #!/bin/bash
 
-NAME=proteins
+NAME=dome/proteins
 IN="$NAME".c
 OUTH="$NAME".h
 OUTL=lib"$NAME".so
