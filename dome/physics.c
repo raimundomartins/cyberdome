@@ -19,9 +19,9 @@ extern int main(int argc, char **argv);
 void block_syscalls() {
     // Appears to be useless (even fail!), but somewhere I read it was required
     //SYSCALL(1, __NR_prctl, 0);
-    long int res = SYSCALL(5, __NR_prctl, PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0);
+    long int res = SYSCALL(prctl, PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0);
     if (res == -1)
-        SYSCALL(1, __NR_exit, -2);
+        SYSCALL(exit, -2);
 
 #define JUMP_EQ(K, Y, N) BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, K, Y, N)
 #define SEC_FIELD(field) (offsetof(struct seccomp_data, field))
@@ -50,9 +50,9 @@ void block_syscalls() {
         .filter = filter,
     };
 
-    res = SYSCALL(3, __NR_seccomp, SECCOMP_SET_MODE_FILTER, 0, &prog);
+    res = SYSCALL(seccomp, SECCOMP_SET_MODE_FILTER, 0, &prog);
     if (res != 0)
-        SYSCALL(1, __NR_exit, -2);
+        SYSCALL(exit, -2);
 }
 
 int32_t atoi(const char *str) {
@@ -93,7 +93,7 @@ void print_int(int32_t v) {
     char buf[12];
     int len = itoa(buf, v);
     buf[len] = '\n';
-    SYSCALL(3, __NR_write, 2, buf, len+1);
+    SYSCALL(write, 2, buf, len+1);
 }
 
 char chr_nibble(char v) {
@@ -111,21 +111,21 @@ void print_hex64(u_int64_t v) {
         digits[i+2] = chr_nibble((v & (0x0fL<<offset)) >> (offset));
     }
     digits[sizeof(digits)-1] = '\n';
-    SYSCALL(3, __NR_write, 2, digits, sizeof(digits));
+    SYSCALL(write, 2, digits, sizeof(digits));
 }
 
 void print_limit(int resource) {
     struct rlimit limit;
-    SYSCALL(4, __NR_prlimit64, 0, resource, NULL, &limit);
+    SYSCALL(prlimit64, 0, resource, NULL, &limit);
     print_int(limit.rlim_cur);
 }
 
 int _enforce_physics_(int argc, char **argv) {
 #ifdef STOP_AT_START // In case we don't follow the ptrace route
-    int pid = SYSCALL(0, __NR_getpid);
+    int pid = SYSCALL(getpid);
     if (pid < 0)
-        SYSCALL(1, __NR_exit, -4); // -4 = -CHILD_ERR_GET_PID
-    SYSCALL(2, __NR_kill, pid, SIGSTOP);
+        SYSCALL(exit, -4); // -4 = -CHILD_ERR_GET_PID
+    SYSCALL(kill, pid, SIGSTOP);
 #endif
 
     print_limit(RLIMIT_CPU);
@@ -135,10 +135,10 @@ int _enforce_physics_(int argc, char **argv) {
 
     int shm_id = atoi(argv[1]);
     print_int(shm_id);
-    long _ground = SYSCALL(3, __NR_shmat, shm_id, NULL, 0);
+    long _ground = SYSCALL(shmat, shm_id, NULL, 0);
     print_hex64(_ground);
     if (_ground == -1) {
-        SYSCALL(1, __NR_exit, -5);
+        SYSCALL(exit, -5);
     }
 
     int *ground = (int *)_ground;

@@ -55,19 +55,27 @@
 #define USE_REG5 USE_REG4, USE_REG(_a5)
 #define USE_REG6 USE_REG5, USE_REG(_a6)
 
-#define SYSCALL(num_params, sys_num, ...) ({ \
+#define ARG_COUNT_AUX(_0, _1, _2, _3, _4, _5, _6, n, ...) n
+#define ARG_COUNT(...) ARG_COUNT_AUX(,##__VA_ARGS__, 6, 5, 4, 3, 2, 1, 0)
+
+#define CAT(a, ...) a ## __VA_ARGS__
+#define EXPAND_CAT(a, ...) CAT(a, __VA_ARGS__)
+
+#define SYSCALL_NR(sys_num, ...) ({ \
     unsigned long int resultvar; \
-    SET_REG##num_params(__VA_ARGS__); \
+    EXPAND_CAT(SET_REG, ARG_COUNT(__VA_ARGS__))(__VA_ARGS__); \
     __asm__ volatile ( \
         "syscall\n\t" \
         : "=a" (resultvar) \
-        : "0" (sys_num) USE_REG##num_params \
+        : "0" (sys_num) EXPAND_CAT(USE_REG, ARG_COUNT(__VA_ARGS__)) \
         : "memory", "cc", "r11", "cx"); \
     (long int) resultvar; \
 })
 
-#define ERRNO_SYSCALL(num_params, sys_num, ...) ({ \
-    long resultvar = SYSCALL(num_params, sys_num, __VA_ARGS__); \
+#define SYSCALL(call, ...) SYSCALL_NR(__NR_##call, __VA_ARGS__)
+
+#define ERRNO_SYSCALL(call, ...) ({ \
+    long resultvar = SYSCALL(call, __VA_ARGS__); \
 	if (resultvar > -4096) { \
         errno = -resultvar; \
         resultvar = -1; \
