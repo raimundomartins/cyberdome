@@ -12,6 +12,7 @@
 #include <sys/prctl.h>
 #include <sys/ptrace.h>
 #include <sys/signal.h>
+#include <sys/shm.h>
 #include <sys/syscall.h>
 #include <sys/resource.h>
 #include <sys/user.h>
@@ -63,10 +64,10 @@ unsigned print_syscall(FILE *fp, long nr) {
 
 struct exec_child_arg {
     const char *dna;
-    int shmem_id;
+    int shm_id;
 };
 
-enum child_err exec_child(void *arg) {
+void exec_child(void *arg) {
 #define DOME_PTRACE
 #ifdef DOME_PTRACE
     // We do not wait to PTRACE this child because on exec it triggers SIGCHLD
@@ -74,7 +75,7 @@ enum child_err exec_child(void *arg) {
     fprintf(stderr, "Dome child setting up PTRACE\n");
     if (ptrace(PTRACE_TRACEME, 0, NULL, NULL) == -1) {
         PRINTERRNO(ptrace);
-        return -CHILD_ERR_PTRACE;
+        exit(-CHILD_ERR_PTRACE);
     }
 #endif
 
@@ -82,6 +83,7 @@ enum child_err exec_child(void *arg) {
     fprintf(stderr, "Dome child setting up SECCOMP\n");
     if(prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) == -1) {
         PRINTERRNO(prctl);
+        exit(-CHILD_ERR_SECCOMP);
     }
 
 #define JUMP_EQ(K, Y, N) BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, K, Y, N)
@@ -125,7 +127,7 @@ enum child_err exec_child(void *arg) {
     switch(seccomp_res) {
     case -1:
         PRINTERRNO(syscall);
-        return -CHILD_ERR_SECCOMP;
+        exit(-CHILD_ERR_SECCOMP);
     case 0: break;
     default:
         fprintf(stderr, "seccomp failed to synchronize with thread id %ld\n",
@@ -134,11 +136,13 @@ enum child_err exec_child(void *arg) {
 #endif
 
     struct exec_child_arg *p = arg;
+    char shm_id[12];
+    sprintf(shm_id, "%d", p->shm_id);
 #if 1
     // Must send shmem_id and use shmat in the child. Maybe in a future version
     // we can make it through ptrace! (and seccomp as well!)
-    fprintf(stderr, "Dome child going to exec '%s'\n", p->dna);
-    execl(p->dna, "alpha", (char *)NULL);
+    fprintf(stderr, "Dome child going to exec '%s': %s %s\n", p->dna, "alpha", shm_id);
+    execl(p->dna, "alpha", shm_id, (char *)NULL);
 #else
     int exe = syscall(__NR_execveat, exefd, "",
                        (char *const []){ "/usr/bin/id", "argh", NULL },
@@ -166,12 +170,31 @@ void set_limits(pid_t pid) {
     prlimit(pid, RLIMIT_AS, &limit, NULL);
     limit = (struct rlimit) { page_size, page_size };
     prlimit(pid, RLIMIT_DATA, &limit, NULL);
-    limit = (struct rlimit) { 1, 1 };
+    limit = (struct rlimit) { page_size, page_size };
     prlimit(pid, RLIMIT_STACK, &limit, NULL);
     printf("Done setting limits for %d\n", pid);
 }
 
-void on_sigchld(int signal, siginfo_t *info, void *data) {
+pid_t create_child(const char *dna, int shmem_id) {
+    pid_t child_pid = fork();
+    switch(child_pid) {
+    case -1: // Error
+        fprintf(stderr, "No clone: %s\n", strerror(errno));
+        break;
+    case 0: { // Child
+        char *dna_cp = strdup(dna);
+        fprintf(stderr, "Child going to exec %s\n", dna_cp);
+        exec_child(&(struct exec_child_arg){ dna_cp, shmem_id });
+        //Does not return, but just in case
+        exit(-CHILD_ERR_EXEC);
+    }
+    default: // Parent
+        printf("Child pid: %d\n", child_pid);
+    }
+    return child_pid;
+}
+
+void on_sigchld(int signal, siginfo_t *info, void *ctx) {
     //switch(signal) { case SIGCHLD:
     printf("Child %d triggered signal because of %d\n", info->si_pid, info->si_code);
     switch(info->si_code) {
@@ -183,7 +206,7 @@ void on_sigchld(int signal, siginfo_t *info, void *data) {
         break;
     case CLD_TRAPPED:
         printf("Child %d trapped\n", info->si_pid);
-        set_limits(info->si_pid);
+        //set_limits(info->si_pid);
         ptrace(PTRACE_DETACH, info->si_pid, NULL, NULL);
         break;
     case CLD_CONTINUED:
@@ -206,49 +229,83 @@ void on_sigchld(int signal, siginfo_t *info, void *data) {
     }
 }
 
-pid_t create_child(const char *dna, int shmem_id) {
-    pid_t child_pid = fork();
-    switch(child_pid) {
-    case -1: // Error
-        fprintf(stderr, "No clone: %s\n", strerror(errno));
-        break;
-    case 0: { // Child
-        char *dna_cp = strdup(dna);
-        fprintf(stderr, "Child going to exec %s\n", dna_cp);
-        exec_child(&(struct exec_child_arg){ dna_cp, shmem_id });
-        //Does not return
-    }
-    default: // Parent
-        printf("Child pid: %d\n", child_pid);
-    }
-    return child_pid;
+// Globals required due to signals :( but only as pointer to readonly data!
+struct {
+    const int *shm_id;
+    const void *floor;
+} g_dome;
+
+void cleanup_exit(int signal, siginfo_t *info, void *ctx) {
+    if (g_dome.floor)
+        shmdt(g_dome.floor);
+    if (g_dome.shm_id)
+        shmctl(*g_dome.shm_id, IPC_RMID, NULL);
+    exit(0);
 }
 
-int main(int argc, char **argv) {
-    printf("Parent pid = %ld\n", getpid());
-
-    {
-        int page_size = sysconf(_SC_PAGESIZE);
-        printf("Page size = %d\n", page_size);
-    }
-
-    // Setup SIGCHLD
+void setup_signals() {
     struct sigaction child_action;
     child_action.sa_sigaction = on_sigchld;
     sigemptyset(&child_action.sa_mask);
     child_action.sa_flags = SA_SIGINFO | SA_NOCLDWAIT;
     sigaction(SIGCHLD, &child_action, NULL);
 
-    pid_t pid = create_child(argv[1], 1);
-    sleep(1);
+    struct sigaction int_action;
+    int_action.sa_sigaction = cleanup_exit;
+    sigemptyset(&int_action.sa_mask);
+    int_action.sa_flags = SA_SIGINFO;
+    sigaction(SIGINT, &int_action, NULL);
+}
+
+int create_floor(size_t size) {
+    key_t shm_key;
+    int shm_id;
+    do {
+        shm_key = rand();
+        shm_id = shmget(shm_key, size, IPC_CREAT | IPC_EXCL);
+    } while(shm_id == -1 && errno == EEXIST);
+    if (shm_id == -1) {
+        PRINTERRNO(create_floor);
+        exit(-1);
+    }
+
+    struct shmid_ds buf;
+    buf.shm_perm.uid = 1000;
+    buf.shm_perm.gid = 100;
+    buf.shm_perm.mode = 0600;
+    shmctl(shm_id, IPC_SET, &buf);
+
+    //See man shmctl for SHM_LOCK (prevent swapping)
+    return shm_id;
+}
+
+int main(int argc, char **argv) {
+    memset(&g_dome, 0, sizeof(g_dome));
+
+    printf("Parent pid = %ld\n", getpid());
+
+    int page_size = sysconf(_SC_PAGESIZE);
+    fprintf(stderr, "Page size = %d\n", page_size);
+
+    size_t floor_size = page_size*1024;
+    int shm_id = create_floor(floor_size);
+    g_dome.shm_id = &shm_id;
+    setup_signals();
+
+    void *floor = shmat(shm_id, NULL, 0);
+    if (floor == (void*)-1) {
+        perror("Failed to attach floor");
+        exit(-1);
+    }
+    g_dome.floor = floor;
+
+    for (int i = 0; i < floor_size / sizeof(int); i++) {
+        ((int *)floor)[i] = i;
+    }
+
+    pid_t pid = create_child(argv[1], shm_id);
     while(1) {
-        //printf("Sleeping");
-        for(int i = 10; i > 0; i--) {
-            //printf(" %d...", i);
-            //fflush(stdout);
-            sleep(1);
-        }
-        printf("\n");
+        sleep(1);
     }
     return 0;
 
