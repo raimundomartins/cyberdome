@@ -17,6 +17,7 @@
 #include <sys/resource.h>
 #include <sys/user.h>
 #include <sys/wait.h>
+#include <time.h>
 #include <unistd.h>
 
 #define PRINTERRNO(callname) do { \
@@ -232,12 +233,12 @@ void on_sigchld(int signal, siginfo_t *info, void *ctx) {
 // Globals required due to signals :( but only as pointer to readonly data!
 struct {
     const int *shm_id;
-    const void *floor;
+    const void *ground;
 } g_dome;
 
 void cleanup_exit(int signal, siginfo_t *info, void *ctx) {
-    if (g_dome.floor)
-        shmdt(g_dome.floor);
+    if (g_dome.ground)
+        shmdt(g_dome.ground);
     if (g_dome.shm_id)
         shmctl(*g_dome.shm_id, IPC_RMID, NULL);
     exit(0);
@@ -257,7 +258,7 @@ void setup_signals() {
     sigaction(SIGINT, &int_action, NULL);
 }
 
-int create_floor(size_t size) {
+int create_ground(size_t size) {
     key_t shm_key;
     int shm_id;
     do {
@@ -265,7 +266,7 @@ int create_floor(size_t size) {
         shm_id = shmget(shm_key, size, IPC_CREAT | IPC_EXCL);
     } while(shm_id == -1 && errno == EEXIST);
     if (shm_id == -1) {
-        PRINTERRNO(create_floor);
+        PRINTERRNO(create_ground);
         exit(-1);
     }
 
@@ -281,26 +282,27 @@ int create_floor(size_t size) {
 
 int main(int argc, char **argv) {
     memset(&g_dome, 0, sizeof(g_dome));
+    srand(time(NULL));
 
     printf("Parent pid = %ld\n", getpid());
 
     int page_size = sysconf(_SC_PAGESIZE);
     fprintf(stderr, "Page size = %d\n", page_size);
 
-    size_t floor_size = page_size*1024;
-    int shm_id = create_floor(floor_size);
+    size_t ground_size = page_size*1024;
+    int shm_id = create_ground(ground_size);
     g_dome.shm_id = &shm_id;
     setup_signals();
 
-    void *floor = shmat(shm_id, NULL, 0);
-    if (floor == (void*)-1) {
-        perror("Failed to attach floor");
+    void *ground = shmat(shm_id, NULL, 0);
+    if (ground == (void*)-1) {
+        perror("Failed to attach ground");
         exit(-1);
     }
-    g_dome.floor = floor;
+    g_dome.ground = ground;
 
-    for (int i = 0; i < floor_size / sizeof(int); i++) {
-        ((int *)floor)[i] = i;
+    for (int i = 0; i < ground_size / sizeof(int); i++) {
+        ((int *)ground)[i] = (rand()%100)+(i+1)*100;
     }
 
     pid_t pid = create_child(argv[1], shm_id);
