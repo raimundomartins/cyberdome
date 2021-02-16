@@ -16,6 +16,25 @@ MAX_STATIC=$(($VOIDPTRSIZE * 8))
 IN="$1"
 OUT="build/${IN%.*}"
 
+debug_mode() {
+    case "$DEBUG" in
+        y|Y|yes|Yes|YES) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+verbose_mode() {
+    case "$VERBOSE" in
+        n|N|no|No|NO) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
+call() {
+    verbose_mode && echo "$@"
+    "$@"
+}
+
 #    -pedantic\
 #    --warn-error\
 CFLAGS="\
@@ -46,8 +65,12 @@ case "${IN##*.}" in
         ;;
 esac
 
-echo $CC "$IN" $CFLAGS -Os -c -o "$OUT.o"
-$CC "$IN" $CFLAGS -Os -c -o "$OUT.o"
+if debug_mode; then
+    CFLAGS="$CFLAGS -g"
+fi
+
+echo "Synthetizing aminoacids... (compiling to object code)"
+call $CC "$IN" $CFLAGS -Os -c -o "$OUT.o"
 if [ $? -ne 0 ]; then
     echo "Error: your DNA is deffective"
     exit 3
@@ -71,21 +94,20 @@ if [ $(($(section_size bss) + $(section_size data))) -gt $MAX_STATIC ]; then
     exit 2
 fi
 
-echo $CC dome/physics.c $CFLAGS -Os -S -o $OUT.S
-$CC dome/physics.c $CFLAGS -Os -S -o $OUT.S
+#call $CC dome/physics.c $CFLAGS -Os -S -o $OUT.S
 
-echo "Adding some codons and folding DNA... (compiling)"
-echo $CC start.S dome/physics.c "$OUT.o" $CFLAGS -Os -o $OUT
-$CC start.S dome/physics.c "$OUT.o" $CFLAGS -Os -o $OUT
+echo "Adding some codons and folding DNA... (injecting startup code and linking)"
+call $CC start.S dome/physics.c "$OUT.o" $CFLAGS -Os -o $OUT
 if [ $? -ne 0 ]; then
     echo "Error: the universe is broken :( (it's not your fault!)"
     exit 3
 fi
 
-echo "Pruning DNA... (stripping binary)"
-strip -s -R .comment -R .gnu.hash -R .note.gnu.build-id -R .gnu.version -R .gnu.version_r "${OUT}"
-
-#rm "${OUT}.o"
+if ! debug_mode; then
+    echo "Pruning DNA... (stripping binary)"
+    strip -s -R .comment -R .gnu.hash -R .note.gnu.build-id -R .gnu.version \
+        -R .gnu.version_r "${OUT}"
+fi
 echo "Success: your DNA folded :)"
 
 make_asm_check_syscalls() { # Unused
