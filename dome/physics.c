@@ -57,8 +57,9 @@ void block_syscalls() {
 
 int32_t atoi(const char *str) {
     int result = 0;
-    while(*str) {
-        result += *str++;
+    char ch;
+    while((ch = *str++) && '0' <= ch && ch <= '9') {
+        result = result * 10 + ch - '0';
     }
     return result;
 }
@@ -88,13 +89,35 @@ int itoa(char *dst, int32_t v) {
     return count + is_negative;
 }
 
-void print_limit(int resource) {
-    struct rlimit limit;
+void print_int(int32_t v) {
     char buf[12];
-    SYSCALL(4, __NR_prlimit64, 0, resource, NULL, &limit);
-    int len = itoa(buf, limit.rlim_cur);
+    int len = itoa(buf, v);
     buf[len] = '\n';
     SYSCALL(3, __NR_write, 2, buf, len+1);
+}
+
+char chr_nibble(char v) {
+    v &= 0x0f;
+    if (v < 10)
+        return '0'+v;
+    else
+        return 'a'+(v-10);
+}
+
+void print_hex64(u_int64_t v) {
+    char digits[19] = "0x";
+    for(int i = 0; i < 16; i++) {
+        int offset = (15-i)*4;
+        digits[i+2] = chr_nibble((v & (0x0fL<<offset)) >> (offset));
+    }
+    digits[sizeof(digits)-1] = '\n';
+    SYSCALL(3, __NR_write, 2, digits, sizeof(digits));
+}
+
+void print_limit(int resource) {
+    struct rlimit limit;
+    SYSCALL(4, __NR_prlimit64, 0, resource, NULL, &limit);
+    print_int(limit.rlim_cur);
 }
 
 int _enforce_physics_(int argc, char **argv) {
@@ -109,6 +132,19 @@ int _enforce_physics_(int argc, char **argv) {
     print_limit(RLIMIT_AS);
     print_limit(RLIMIT_DATA);
     print_limit(RLIMIT_STACK);
+
+    int shm_id = atoi(argv[1]);
+    print_int(shm_id);
+    long _ground = SYSCALL(3, __NR_shmat, shm_id, NULL, 0);
+    print_hex64(_ground);
+    if (_ground == -1) {
+        SYSCALL(1, __NR_exit, -5);
+    }
+
+    int *ground = (int *)_ground;
+    print_int(ground[0]);
+    print_int(ground[1]);
+    print_int(ground[2]);
 
     block_syscalls();
     print_limit(RLIMIT_STACK); // should fail to get limit and print anything
