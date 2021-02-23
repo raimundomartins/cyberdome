@@ -104,6 +104,8 @@ char chr_nibble(char v) {
         return 'a'+(v-10);
 }
 
+//int errno;
+
 void print_hex64(u_int64_t v) {
     char digits[19] = "0x";
     for(int i = 0; i < 16; i++) {
@@ -114,11 +116,14 @@ void print_hex64(u_int64_t v) {
     SYSCALL(write, 2, digits, sizeof(digits));
 }
 
+// Try optimization: add new first parameter, always give it 0
 void print_limit(int resource) {
     struct rlimit limit;
     SYSCALL(prlimit64, 0, resource, NULL, &limit);
     print_int(limit.rlim_cur);
 }
+
+//extern long edata, etext, end, __executable_start;
 
 int _enforce_physics_(int argc, char **argv) {
 #ifdef STOP_AT_START // In case we don't follow the ptrace route
@@ -128,25 +133,24 @@ int _enforce_physics_(int argc, char **argv) {
     SYSCALL(kill, pid, SIGSTOP);
 #endif
 
-    print_limit(RLIMIT_CPU);
-    print_limit(RLIMIT_AS);
-    print_limit(RLIMIT_DATA);
-    print_limit(RLIMIT_STACK);
-
     int shm_id = atoi(argv[1]);
-    print_int(shm_id);
+
+    // Example of heap creation/management
+    /*long data_begin, data_end;
+    data_begin = data_end = SYSCALL(brk, -1L); // Should return _edata
+    data_end = SYSCALL(brk, data_begin + 0x1000);
+    *((long *)data_begin) = 1;*/
+
     long _ground = SYSCALL(shmat, shm_id, NULL, 0);
-    print_hex64(_ground);
     if (_ground == -1) {
         SYSCALL(exit, -5);
     }
 
-    int *ground = (int *)_ground;
+    /*int *ground = (int *)_ground;
     print_int(ground[0]);
     print_int(ground[1]);
-    print_int(ground[2]);
+    print_int(ground[2]);*/
 
     block_syscalls();
-    print_limit(RLIMIT_STACK); // should fail to get limit and print anything
     return main(argc, argv);
 }
